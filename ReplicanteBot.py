@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import time
+import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -11,7 +12,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    filename='bot_logs.log'  # Salva logs em arquivo para auditoria
+    handlers=[
+        logging.FileHandler("bot_logs.log"),  # Salva logs em arquivo
+        logging.StreamHandler()  # Exibe logs no terminal
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -650,19 +654,20 @@ async def processar_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             
             for grupo_id in grupos_selecionados:
                 try:
-                    await context.bot.copy_message(
-                        chat_id=grupo_id,
-                        from_chat_id=GRUPO_ORIGEM_ID,
-                        message_id=original_message_id
-                    )
+                    # Use forward_message em vez de copy_message
+                    await context.bot.forward_message(
+                    chat_id=grupo_id,
+                    from_chat_id=GRUPO_ORIGEM_ID,
+                     message_id=original_message_id
+                )
                     sucessos += 1
-                    logger.info(f"Mensagem {original_message_id} repostada para o grupo {grupo_id}")
+                    logger.info(f"Mensagem {original_message_id} encaminhada para o grupo {grupo_id}")
                 except Exception as e:
                     falhas += 1
                     nome_grupo = GRUPOS_INFO.get(str(grupo_id), f"Grupo {grupo_id}")
                     erro_msg = f"Grupo {nome_grupo} ({grupo_id}): {str(e)}"
                     detalhes_falhas.append(erro_msg)
-                    logger.error(f"Erro ao repostar para o grupo {grupo_id}: {e}")
+                    logger.error(f"Erro ao encaminhar para o grupo {grupo_id}: {e}")
             
           # Atualiza a mensagem com o resultado
             mensagem_resultado = f"✅ Mensagem repostada com sucesso para {sucessos} grupos.\n"
@@ -727,7 +732,9 @@ def main() -> None:
             filters.Chat(chat_id=GRUPO_ORIGEM_ID) & ~filters.COMMAND, 
             processar_mensagem
         ))
-        
+         
+        log_thread = threading.Thread(target=log_status_periodico, daemon=True)
+        log_thread.start()
         # Handler para processar callbacks de botões
         application.add_handler(CallbackQueryHandler(processar_callback))
 
@@ -737,7 +744,20 @@ def main() -> None:
     except Exception as e:
         logger.critical(f"Erro crítico na inicialização do bot: {e}")
         print(f"Erro crítico: {e}")
-
+def log_status_periodico():
+    """Imprime periodicamente o status do bot no terminal"""
+    while True:
+        estatisticas = (
+            "\n\n📊 Status do Bot (Atualização periódica)\n"
+            f"🔄 Total de grupos de destino: {len(GRUPOS_DESTINO)}\n"
+            f"👥 Total de administradores: {len(ADMIN_IDS)}\n"
+            f"📢 Grupo de origem configurado: {'Sim' if GRUPO_ORIGEM_ID != 0 else 'Não'}\n"
+            f"📝 Mensagens em fila para repostagem: {len(MENSAGENS_PARA_REPOSTAR)}\n"
+            "⚙️ Bot em execução\n"
+        )
+        logger.info(estatisticas)
+        time.sleep(30)  # Aguarda 30 segundos antes de imprimir novamente
+        
 def main_seguro() -> None:
     """Inicia o bot com verificações de segurança."""
     try:
